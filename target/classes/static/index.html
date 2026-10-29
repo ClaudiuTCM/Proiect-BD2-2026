@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="ro"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>WingLog</title>
+<style>
+body{margin:0;font-family:system-ui,sans-serif;background:#f2f5f0;padding-bottom:70px;color:#1d2b24}
+header{background:#2e6b4f;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;font-weight:600}
+select,input,button{font:inherit;padding:10px;margin:4px 0;width:100%;box-sizing:border-box}
+header select{width:auto;margin:0}
+.card{background:#fff;margin:8px;padding:12px;border-radius:10px}
+.card small{color:#667}
+.badge{font-size:12px;padding:2px 8px;border-radius:8px;background:#ddd}
+.validata{background:#bfe8c9}.respinsa{background:#f3c1c1}.in_asteptare{background:#ffe9a8}
+nav{position:fixed;bottom:0;left:0;right:0;display:flex;background:#fff;border-top:1px solid #ccc}
+nav button{flex:1;border:0;background:none;margin:0;padding:14px 2px;font-size:12px}
+.row{display:flex;gap:8px}.row button{flex:1}
+</style></head><body>
+<header>🐦 WingLog <select id="me" onchange="me=+this.value;show(tab)"></select></header>
+<div id="app"></div>
+<nav>
+ <button onclick="show('obs')">Observații</button>
+ <button onclick="show('add')">➕ Adaugă</button>
+ <button onclick="show('val')">Validare</button>
+ <button onclick="show('sp')">Specii</button>
+ <button onclick="show('loc')">Locații</button>
+ <button onclick="show('stat')">Top</button>
+</nav>
+<script>
+let me = 1, tab = 'obs', users = [];
+const $ = s => document.querySelector(s), app = $('#app');
+async function j(p, o) {
+  const r = await fetch('/api/' + p, o);
+  const d = r.status == 204 ? null : await r.json();
+  if (!r.ok) { alert(d.error || 'Eroare'); throw 0; }
+  return d;
+}
+const send = (m, p, b) => j(p, {method: m, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(b)});
+const dt = x => new Date(x).toLocaleString('ro-RO');
+const card = o => `<div class="card"><b>${o.nume_comun}</b> ×${o.nr_exemplare}
+  <span class="badge ${o.status}">${o.status}</span><br>
+  <small>${o.locatie} · ${dt(o.data_observatie)} · @${o.username}</small><br>${o.comportament || ''}`;
+
+async function show(t) {
+  tab = t;
+  if (t == 'obs') {
+    const l = await j('observatii/detalii');
+    app.innerHTML = l.map(o => card(o) + `<br><button onclick="del(${o.id})">Șterge</button></div>`).join('');
+  } else if (t == 'add') {
+    const [sp, lc] = await Promise.all([j('specii'), j('locatii')]);
+    app.innerHTML = `<div class="card"><h3>Observație nouă</h3>
+      <select id="sp">${sp.map(s => `<option value=${s.id}>${s.nume_comun}</option>`)}</select>
+      <select id="lc">${lc.map(s => `<option value=${s.id}>${s.nume}</option>`)}</select>
+      <input id="dt" type="datetime-local"><input id="nr" type="number" min="1" value="1" placeholder="Nr. exemplare">
+      <input id="cp" placeholder="Comportament"><button onclick="save()">Salvează</button></div>`;
+  } else if (t == 'val') {
+    const l = await j('observatii/detalii?status=in_asteptare');
+    app.innerHTML = '<div class="card">Coadă de validare (doar validator/admin)</div>' +
+      l.map(o => card(o) + `<div class="row"><button onclick="validate(${o.id},'validata')">✔ Validează</button>
+      <button onclick="validate(${o.id},'respinsa')">✖ Respinge</button></div></div>`).join('');
+  } else if (t == 'sp') {
+    const l = await j('specii');
+    app.innerHTML = l.map(s => `<div class="card"><b>${s.nume_comun}</b> <i>${s.nume_stiintific}</i>
+      <span class="badge">${s.status_conservare}</span></div>`).join('');
+  } else if (t == 'loc') {
+    const l = await j('locatii');
+    app.innerHTML = l.map(s => `<div class="card"><b>${s.nume}</b><br><small>${s.judet} · ${s.habitat} ·
+      ${s.latitudine}, ${s.longitudine}</small></div>`).join('');
+  } else if (t == 'stat') {
+    const l = await j('statistici/top-specii');
+    app.innerHTML = l.map(s => `<div class="card">#${s.pozitie} <b>${s.nume_comun}</b> —
+      ${s.observatii} obs., ${s.exemplare} ex.</div>`).join('');
+  }
+}
+async function save() {
+  await send('POST', 'observatii', {utilizator_id: me, specie_id: +$('#sp').value, locatie_id: +$('#lc').value,
+    data_observatie: $('#dt').value, nr_exemplare: +$('#nr').value, comportament: $('#cp').value});
+  show('obs');
+}
+async function del(id) { await j('observatii/' + id, {method: 'DELETE'}); show('obs'); }
+async function validate(id, decizie) {
+  await send('POST', `observatii/${id}/valideaza`, {validator_id: me, decizie, comentariu: ''}); show('val');
+}
+(async () => {
+  users = await j('utilizatori');
+  $('#me').innerHTML = users.map(u => `<option value=${u.id}>${u.username} (${u.rol})</option>`).join('');
+  me = users[0].id; show('obs');
+})();
+</script></body></html>
